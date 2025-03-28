@@ -27,6 +27,7 @@ extern "C"
 }
 #include "HardWire.h"
 #include "DS1307Emulator.h"
+#include <Arduino.h>
 
 
 /*DS RTC defines*/
@@ -170,6 +171,9 @@ const uint8_t nvRamReset[56] = {
 static DS1307_GLOBAL_DATA_T rtcData;
 static RTC_DATA_BUFF_T rtcDataBuffered;
 static uint8_t nvRam[56];
+int g_cnt = 0;
+int g_wcnt = 0;
+uint8_t g_op = RTC_OP_WR;
 
 // Constructors ////////////////////////////////////////////////////////////////
 
@@ -192,21 +196,27 @@ static void DS1307emulatorWrapper_tick(void)
 
 static void DS1307emulatorWrapper_OnReceive(int data)
 {
+  //Serial.println("Emu OnReceive");
 	DS1307emulator::setUserData();
 }
 
 void DS1307emulatorWrapper_OnReceiveAdx(void)
 {
+  //Serial.println("Emu OnReceiveAdx");
 	DS1307emulator::bufferUserData();
 }
 
 void DS1307emulatorWrapper_OnReceiveData(int data)
 {
+  //Serial.print("Emu OnReceiveData:");
+  //Serial.println(data,HEX);
+  //Serial.println(rtcData.dataByte);
 	DS1307emulator::writeToRTC((uint8_t)data);
 }
 
 void DS1307emulatorWrapper_OnReceiveDataNack(void)
 {
+  //Serial.println("Emu OnReceiveDataNack");
 	DS1307emulator::setUserData();
 }
 
@@ -215,15 +225,43 @@ void DS1307emulatorWrapper_OnReceiveDataNack(void)
 void DS1307emulatorWrapper_OnRequest(void)
 {
   uint8_t data;
-  DS1307emulator::bufferUserData();
-  data = DS1307emulator::readUserData();
-  Wire.write(data);
+  //Serial.print("Emu On Request:");
+  //Serial.println(g_wcnt);
+  //DS1307emulator::bufferUserData();
+  //data = DS1307emulator::readUserData();
+  //Serial.println("Wire write!!!!!");
+  //Serial.println(data);
+  //g_cnt++;
+  //Wire.write(data);
+  if(g_wcnt == 1) {
+	g_op = RTC_OP_RD;
+  	//Serial.println("OnReq read....");
+  } else {
+	g_op = RTC_OP_WR;
+  	//Serial.println("OnReq write....");
+  }
+  //Serial.println(g_op);
+  g_wcnt = 0;
+  //Serial.println(g_cnt);
 }
 
 
 uint8_t DS1307emulatorWrapper_OnRequestData(void)
 {
-	return DS1307emulator::readUserData();
+	//return DS1307emulator::readUserData();
+  uint8_t data;
+  //Serial.print("Emu On Request Data: ");
+  data = DS1307emulator::readUserData();
+	if(g_op == RTC_OP_RD) {
+		g_cnt++;
+  		if(g_cnt < 8) {
+			Serial.println(data,HEX);
+	  		Wire.write(data);
+		} else {
+	  		Wire.write(0);
+		}
+	}
+  return data;
 }
 
 void DS1307emulatorWrapper_OnRequestDataNack(void)
@@ -451,9 +489,12 @@ void DS1307emulator::putMonth(uint8_t data)
 void DS1307emulator::setUserData(void)
 {
 			
+  //Serial.print("Emu setUserData: ");
+  //Serial.println(rtcData.lastOperation);
 	if (rtcData.lastOperation == RTC_OP_RD)
 	{
 		/* do nothing */
+  //Serial.println("Do noting");
 	}
 	else
 	{
@@ -527,7 +568,10 @@ void DS1307emulator::setUserData(void)
 uint8_t DS1307emulator::readUserData(void)
 {
 	uint8_t data = 0;
+  //Serial.print("Emu readUserData: ");
+  //Serial.println(data);
 	DS1307emulator::getFromRTC(&data);
+  //Serial.println(data);
 	rtcData.lastOperation == RTC_OP_RD;
 	return (data);
 }
@@ -548,8 +592,6 @@ void DS1307emulator::busConnect()
 	Wire.onRequestData(DS1307emulatorWrapper_OnRequestData);
 	Wire.onRequestDataNack(DS1307emulatorWrapper_OnRequestDataNack);
 }
-
-
 
 void DS1307emulator::softInit(uint8_t pin)
 {
@@ -605,9 +647,6 @@ void DS1307emulator::init(uint8_t pin)
 }
 
  
-
-
-
 /* API Chiamata da ISR timer */
 void DS1307emulator::tickIncrementISR(void)
 {
@@ -714,6 +753,8 @@ void DS1307emulator::tickIncrementISR(void)
 uint8_t DS1307emulator::getFromRTC(unsigned char *data)
 {
 	
+  //Serial.print("getFromRTC: ");
+  //Serial.println(rtcData.ptr);
 	
 	switch (rtcData.ptr){
 		case SEC: //seconds
@@ -767,6 +808,7 @@ uint8_t DS1307emulator::getFromRTC(unsigned char *data)
 
 void DS1307emulator::bufferUserData(void)
 {
+  //Serial.println("buffer User Data");
 	/* Save all time dependant data, as stated in DS1307 */
 	rtcDataBuffered.second = decToBcd(rtcData.second);
 	rtcDataBuffered.minute = decToBcd(rtcData.minute);
@@ -782,8 +824,13 @@ void DS1307emulator::bufferUserData(void)
 
 uint8_t DS1307emulator::writeToRTC(unsigned char data){
 	
+  //Serial.print("Write to RTC: ");
+  //Serial.print(rtcData.dataByte);
+  //Serial.print("-");
+  //Serial.println(data);
 	//uint8_t noWrite = 1;
 	
+	g_wcnt++;
 	if (rtcData.dataByte == 0)
 	{
 		rtcData.ptr = data;
@@ -791,6 +838,9 @@ uint8_t DS1307emulator::writeToRTC(unsigned char data){
 	}
 	else
 	{
+
+  //Serial.print("ptr : ");
+  //Serial.println(rtcData.ptr);
 		switch (rtcData.ptr){
 		case SEC: //seconds
 			DS1307emulator::putSecond(data);
